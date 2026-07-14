@@ -101,3 +101,21 @@ Once you're happy with `frontend/` itself, you can also deploy the whole app wit
 ```bash
 npm run deploy -- --path ./frontend --name my-posts-app
 ```
+
+## Continuous deployment from GitHub
+
+`.github/workflows/deploy-netlify.yml` builds `frontend/` and deploys it to Netlify automatically on every push to `master` that touches `frontend/` (also runnable manually via "Run workflow").
+
+One-time setup:
+
+1. Create the Netlify site once, e.g. locally:
+   ```bash
+   npm run deploy -- --path ./frontend --name my-posts-app
+   ```
+   Note the site ID printed (or find it later under Site settings → General → Site details → Site ID).
+2. Create a Netlify Personal Access Token: https://app.netlify.com/user/applications#personal-access-tokens
+3. In the GitHub repo, go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+   - `NETLIFY_AUTH_TOKEN` — the token from step 2
+   - `NETLIFY_SITE_ID` — the site ID from step 1
+
+After that, every push to `master` touching `frontend/` redeploys the site automatically — no local Netlify CLI needed.
