@@ -65,6 +65,32 @@ button[type="submit"]:hover {
   font-size: 0.85rem;
 }
 
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.actions button[type="button"] {
+  padding: 0.6rem 1.5rem;
+  border: 1px solid #d0d0d5;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.hint {
+  margin: 0;
+  color: #666;
+  font-size: 0.8rem;
+}
+
+.status {
+  margin: 0;
+  color: #0b6e4f;
+  font-size: 0.85rem;
+}
+
 #items {
   display: grid;
   gap: 1rem;
