@@ -60,3 +60,41 @@ Skips scaffolding and builds/deploys whatever is already in that folder.
 4. `netlify deploy --dir=dist --prod --json` — uploads the build output
 
 Each run creates a new, independent Netlify site — useful for spinning up demo/preview projects automatically.
+
+## Sample app: `frontend/` + `backend/`
+
+A small full-stack example lives alongside the CLI: a form to submit a post (title, description, image URL, original URL) backed by a REST API.
+
+### Backend (`backend/`)
+
+Express API storing submissions in `backend/data/items.json`.
+
+```bash
+cd backend
+npm install
+npm run dev   # http://localhost:3001
+```
+
+Endpoints:
+- `GET /api/items` — list all submitted posts
+- `POST /api/items` — create a post, body: `{ title, description, imageUrl, originalUrl }` (`title` required)
+- `DELETE /api/items/:id` — remove a post
+
+### Frontend (`frontend/`)
+
+Vanilla JS + Vite form for `title`, `description`, `url image`, `url original`, with a live list of submitted posts below it.
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_URL, defaults to http://localhost:3001
+npm run dev             # http://localhost:5173
+```
+
+Run the backend first, then the frontend, and submit the form — new posts appear instantly below it.
+
+Once you're happy with `frontend/`, deploy it to Netlify with the CLI above:
+
+```bash
+npm run deploy -- --path ./frontend --name my-posts-app
+```
