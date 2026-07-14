@@ -22,14 +22,39 @@ async function ensureDataFile() {
   }
 }
 
-async function readItems() {
-  await ensureDataFile();
-  const raw = await readFile(DATA_FILE, "utf-8");
-  return JSON.parse(raw);
+// In-memory cache backed by the JSON file: reads are served straight from
+// memory (no disk I/O per request), and writes go through writeLock so
+// concurrent requests can't race and clobber each other's changes.
+let itemsCache = null;
+let loadingPromise = null;
+let writeLock = Promise.resolve();
+
+async function getItems() {
+  if (itemsCache) return itemsCache;
+
+  if (!loadingPromise) {
+    loadingPromise = (async () => {
+      await ensureDataFile();
+      const raw = await readFile(DATA_FILE, "utf-8");
+      itemsCache = JSON.parse(raw);
+    })();
+  }
+
+  await loadingPromise;
+  return itemsCache;
 }
 
-async function writeItems(items) {
-  await writeFile(DATA_FILE, JSON.stringify(items, null, 2));
+function withWriteLock(task) {
+  const run = writeLock.then(task, task);
+  writeLock = run.then(
+    () => {},
+    () => {}
+  );
+  return run;
+}
+
+async function persistItems() {
+  await writeFile(DATA_FILE, JSON.stringify(itemsCache, null, 2));
 }
 
 function escapeHtml(value = "") {
@@ -50,21 +75,29 @@ function slugify(value) {
     .slice(0, 40);
 }
 
+function formatDate(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+
 async function renderItemHtml(item) {
   const template = await readFile(TEMPLATE_FILE, "utf-8");
 
-  const imageBlock = item.imageUrl
+  const imageTag = item.imageUrl
     ? `<img src="${escapeHtml(item.imageUrl)}" alt="${escapeHtml(item.title)}" />`
     : "";
-  const originalBlock = item.originalUrl
-    ? `<a class="original" href="${escapeHtml(item.originalUrl)}" target="_blank" rel="noopener noreferrer">View original</a>`
+  const ctaBlock = item.originalUrl
+    ? `<a class="cta" href="${escapeHtml(item.originalUrl)}" target="_blank" rel="noopener noreferrer">Visit original &#8599;</a>`
     : "";
 
   return template
     .replaceAll("{{title}}", escapeHtml(item.title))
     .replaceAll("{{description}}", escapeHtml(item.description))
-    .replaceAll("{{imageBlock}}", imageBlock)
-    .replaceAll("{{originalBlock}}", originalBlock);
+    .replaceAll("{{imageTag}}", imageTag)
+    .replaceAll("{{heroClass}}", item.imageUrl ? "" : " no-image")
+    .replaceAll("{{ctaBlock}}", ctaBlock)
+    .replaceAll("{{publishedDate}}", escapeHtml(formatDate(item.createdAt)));
 }
 
 function zipFile(filename, content) {
@@ -83,112 +116,156 @@ function zipFile(filename, content) {
   });
 }
 
+function asyncHandler(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
-app.get("/api/items", async (req, res) => {
-  const items = await readItems();
-  res.json(items);
-});
+app.get(
+  "/api/items",
+  asyncHandler(async (req, res) => {
+    const items = await getItems();
+    res.json(items);
+  })
+);
 
-app.post("/api/items", async (req, res) => {
-  const { title, description = "", imageUrl = "", originalUrl = "" } = req.body ?? {};
+app.post(
+  "/api/items",
+  asyncHandler(async (req, res) => {
+    const { title, description = "", imageUrl = "", originalUrl = "" } = req.body ?? {};
 
-  if (!title || !String(title).trim()) {
-    return res.status(400).json({ error: "title is required" });
-  }
-
-  const item = {
-    id: randomUUID(),
-    title: String(title).trim(),
-    description: String(description).trim(),
-    imageUrl: String(imageUrl).trim(),
-    originalUrl: String(originalUrl).trim(),
-    createdAt: new Date().toISOString(),
-  };
-
-  const items = await readItems();
-  items.unshift(item);
-  await writeItems(items);
-
-  res.status(201).json(item);
-});
-
-app.delete("/api/items/:id", async (req, res) => {
-  const items = await readItems();
-  const next = items.filter((item) => item.id !== req.params.id);
-
-  if (next.length === items.length) {
-    return res.status(404).json({ error: "item not found" });
-  }
-
-  await writeItems(next);
-  res.status(204).end();
-});
-
-app.post("/api/items/:id/deploy", async (req, res) => {
-  const authHeader = req.headers.authorization || "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
-
-  if (!token) {
-    return res.status(401).json({ error: "Missing Netlify access token" });
-  }
-
-  const items = await readItems();
-  const item = items.find((entry) => entry.id === req.params.id);
-
-  if (!item) {
-    return res.status(404).json({ error: "item not found" });
-  }
-
-  try {
-    const html = await renderItemHtml(item);
-    const zipBuffer = await zipFile("index.html", html);
-    const siteName = `${slugify(item.title) || "item"}-${item.id.slice(0, 8)}`;
-
-    const createResponse = await fetch(`${NETLIFY_API}/sites`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: siteName }),
-    });
-
-    if (!createResponse.ok) {
-      throw new Error(`Failed to create Netlify site (${createResponse.status}): ${await createResponse.text()}`);
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: "title is required" });
     }
 
-    const site = await createResponse.json();
-
-    const deployResponse = await fetch(`${NETLIFY_API}/sites/${site.id}/deploys`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/zip",
-      },
-      body: zipBuffer,
-    });
-
-    if (!deployResponse.ok) {
-      throw new Error(`Failed to deploy to Netlify (${deployResponse.status}): ${await deployResponse.text()}`);
-    }
-
-    const updatedItem = {
-      ...item,
-      deployUrl: site.ssl_url || site.url,
-      adminUrl: site.admin_url,
-      deployedAt: new Date().toISOString(),
+    const item = {
+      id: randomUUID(),
+      title: String(title).trim(),
+      description: String(description).trim(),
+      imageUrl: String(imageUrl).trim(),
+      originalUrl: String(originalUrl).trim(),
+      createdAt: new Date().toISOString(),
     };
 
-    const nextItems = items.map((entry) => (entry.id === item.id ? updatedItem : entry));
-    await writeItems(nextItems);
+    await withWriteLock(async () => {
+      const items = await getItems();
+      items.unshift(item);
+      await persistItems();
+    });
 
-    res.json(updatedItem);
-  } catch (error) {
-    res.status(502).json({ error: error.message });
+    res.status(201).json(item);
+  })
+);
+
+app.delete(
+  "/api/items/:id",
+  asyncHandler(async (req, res) => {
+    let found = false;
+
+    await withWriteLock(async () => {
+      const items = await getItems();
+      const index = items.findIndex((entry) => entry.id === req.params.id);
+      if (index === -1) return;
+      found = true;
+      items.splice(index, 1);
+      await persistItems();
+    });
+
+    if (!found) {
+      return res.status(404).json({ error: "item not found" });
+    }
+
+    res.status(204).end();
+  })
+);
+
+app.post(
+  "/api/items/:id/deploy",
+  asyncHandler(async (req, res) => {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+
+    if (!token) {
+      return res.status(401).json({ error: "Missing Netlify access token" });
+    }
+
+    const items = await getItems();
+    const item = items.find((entry) => entry.id === req.params.id);
+
+    if (!item) {
+      return res.status(404).json({ error: "item not found" });
+    }
+
+    try {
+      const html = await renderItemHtml(item);
+      const zipBuffer = await zipFile("index.html", html);
+      const siteName = `${slugify(item.title) || "item"}-${item.id.slice(0, 8)}`;
+
+      const createResponse = await fetch(`${NETLIFY_API}/sites`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: siteName }),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error(`Failed to create Netlify site (${createResponse.status}): ${await createResponse.text()}`);
+      }
+
+      const site = await createResponse.json();
+
+      const deployResponse = await fetch(`${NETLIFY_API}/sites/${site.id}/deploys`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/zip",
+        },
+        body: zipBuffer,
+      });
+
+      if (!deployResponse.ok) {
+        throw new Error(`Failed to deploy to Netlify (${deployResponse.status}): ${await deployResponse.text()}`);
+      }
+
+      const updatedItem = {
+        ...item,
+        deployUrl: site.ssl_url || site.url,
+        adminUrl: site.admin_url,
+        deployedAt: new Date().toISOString(),
+      };
+
+      await withWriteLock(async () => {
+        const currentItems = await getItems();
+        const index = currentItems.findIndex((entry) => entry.id === item.id);
+        if (index !== -1) currentItems[index] = updatedItem;
+        await persistItems();
+      });
+
+      res.json(updatedItem);
+    } catch (error) {
+      res.status(502).json({ error: error.message });
+    }
+  })
+);
+
+// Safety net: never let an unexpected error take the whole process down.
+app.use((err, req, res, next) => {
+  if (err.type === "entity.parse.failed") {
+    return res.status(400).json({ error: "Invalid JSON body" });
   }
+  console.error(err);
+  res.status(500).json({ error: "Internal server error" });
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled rejection:", reason);
 });
 
 const PORT = process.env.PORT || 3001;
