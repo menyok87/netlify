@@ -79,6 +79,7 @@ Endpoints:
 - `GET /api/items` — list all submitted posts
 - `POST /api/items` — create a post, body: `{ title, description, imageUrl, originalUrl }` (`title` required)
 - `DELETE /api/items/:id` — remove a post
+- `POST /api/items/:id/deploy` — render `backend/templates/item.html` with that post's data, zip it, and publish it as a brand new Netlify site via the Netlify API. Requires header `Authorization: Bearer <netlify-personal-access-token>`. Persists `deployUrl`/`adminUrl` back onto the item.
 
 ### Frontend (`frontend/`)
 
@@ -93,7 +94,9 @@ npm run dev             # http://localhost:5173
 
 Run the backend first, then the frontend, and submit the form — new posts appear instantly below it.
 
-Once you're happy with `frontend/`, deploy it to Netlify with the CLI above:
+Each post has a **Deploy to Netlify** button: it reads the token you saved in the Netlify Settings section and calls `POST /api/items/:id/deploy`, which publishes a standalone page (`backend/templates/item.html`, filled in with that post's title/description/image/original link) as a new Netlify site and shows the live URL under the post.
+
+Once you're happy with `frontend/` itself, you can also deploy the whole app with the CLI above:
 
 ```bash
 npm run deploy -- --path ./frontend --name my-posts-app

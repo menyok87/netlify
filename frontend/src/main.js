@@ -115,11 +115,50 @@ form.addEventListener("submit", async (event) => {
 });
 
 itemsEl.addEventListener("click", async (event) => {
-  if (!event.target.matches(".delete")) return;
-  const id = event.target.dataset.id;
-  await fetch(`${API_URL}/api/items/${id}`, { method: "DELETE" });
-  await loadItems();
+  if (event.target.matches(".delete")) {
+    const id = event.target.dataset.id;
+    await fetch(`${API_URL}/api/items/${id}`, { method: "DELETE" });
+    await loadItems();
+    return;
+  }
+
+  if (event.target.matches(".deploy")) {
+    await deployItem(event.target);
+  }
 });
+
+async function deployItem(button) {
+  const id = button.dataset.id;
+  const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+
+  if (!token) {
+    alert("Save your Netlify personal access token first.");
+    return;
+  }
+
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = "Deploying...";
+
+  try {
+    const response = await fetch(`${API_URL}/api/items/${id}/deploy`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.error || "Deploy failed");
+    }
+
+    await loadItems();
+  } catch (error) {
+    alert(error.message);
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
 
 async function loadItems() {
   const response = await fetch(`${API_URL}/api/items`);
@@ -135,7 +174,11 @@ function renderItem(item) {
       <h3>${escapeHtml(item.title)}</h3>
       <p>${escapeHtml(item.description)}</p>
       ${item.originalUrl ? `<a href="${escapeHtml(item.originalUrl)}" target="_blank" rel="noopener noreferrer">View original</a>` : ""}
-      <div><button data-id="${item.id}" class="delete">Delete</button></div>
+      ${item.deployUrl ? `<p class="status">Live: <a href="${escapeHtml(item.deployUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.deployUrl)}</a></p>` : ""}
+      <div class="card-actions">
+        <button data-id="${item.id}" class="deploy">${item.deployUrl ? "Redeploy" : "Deploy to Netlify"}</button>
+        <button data-id="${item.id}" class="delete">Delete</button>
+      </div>
     </article>
   `;
 }
