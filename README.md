@@ -1,2 +1,62 @@
 # netlify
-automatic new project
+
+Automatic new project upload — scaffold a [Vite](https://vitejs.dev) project, build it, and deploy it to [Netlify](https://netlify.com) as a brand new site, all in one Node.js command.
+
+## Setup
+
+```bash
+npm install
+cp .env.example .env
+```
+
+Create a Netlify Personal Access Token at https://app.netlify.com/user/applications#personal-access-tokens and put it in `.env`:
+
+```
+NETLIFY_AUTH_TOKEN=your-token-here
+```
+
+## Usage
+
+### Scaffold a new Vite project and deploy it
+
+```bash
+npm run deploy -- --name my-app --template react
+```
+
+This will:
+1. Run `npm create vite@latest my-app -- --template react` to scaffold a new project
+2. `npm install` and `npm run build` inside it
+3. Create a new Netlify site named `my-app`
+4. Deploy the `dist` folder to that site as a production deploy
+
+Available `--template` values match Vite's own templates: `vanilla`, `vanilla-ts`, `vue`, `vue-ts`, `react`, `react-ts`, `preact`, `preact-ts`, `lit`, `lit-ts`, `svelte`, `svelte-ts`, `solid`, `solid-ts`, `qwik`, `qwik-ts`.
+
+### Deploy an existing project
+
+```bash
+npm run deploy -- --path ./my-existing-app --name my-existing-app
+```
+
+Skips scaffolding and builds/deploys whatever is already in that folder.
+
+### Options
+
+| Flag | Description | Default |
+| --- | --- | --- |
+| `-n, --name <name>` | Project & Netlify site name | — |
+| `-t, --template <template>` | Vite template to scaffold | `vanilla` |
+| `-p, --path <path>` | Deploy an existing project instead of scaffolding | — |
+| `--account-slug <slug>` | Netlify team/account slug | your default account |
+| `--dir <dir>` | Build output directory to deploy | `dist` |
+| `--no-prod` | Create a draft deploy instead of a production deploy | production |
+
+## How it works
+
+`scripts/deploy.js` is a small Node.js CLI built on top of the official [`netlify-cli`](https://www.npmjs.com/package/netlify-cli):
+
+1. `npm create vite@latest` — scaffolds the project non-interactively
+2. `npm install` / `npm run build` — installs deps and builds
+3. `netlify sites:create --json` — creates a fresh Netlify site
+4. `netlify deploy --dir=dist --prod --json` — uploads the build output
+
+Each run creates a new, independent Netlify site — useful for spinning up demo/preview projects automatically.

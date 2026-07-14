@@ -1,0 +1,19 @@
+{
+  "name": "netlify-auto-upload-vite",
+  "version": "1.0.0",
+  "description": "Automatically scaffold a Vite project, build it, and deploy it to Netlify as a new site",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "netlify-auto-upload": "./scripts/deploy.js"
+  },
+  "scripts": {
+    "deploy": "node scripts/deploy.js"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "execa": "^9.3.0",
+    "netlify-cli": "^17.36.4"
+  }
+}
